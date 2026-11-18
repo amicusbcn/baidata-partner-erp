@@ -10,7 +10,7 @@ import DiagnosticsView from "./components/views/DiagnosticsView";
 import WorkshopTestingView from "./components/views/WorkshopTestingView";
 import BillingDeliveryView from "./components/views/BillingDeliveryView";
 import InventoryView from "./components/views/InventoryView";
-import EdcTransferModal from "./components/EdcTransferModal";
+import EdcTransferModal from "./components/modals/EdcTransferModal";
 
 const STATUS_TO_TAB = {
   received: "reception",
