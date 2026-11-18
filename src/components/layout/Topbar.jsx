@@ -34,4 +34,4 @@ export default function TopBar({ lang = "es", onChangeLang }) {
       </div>
     </header>
   );
-}
+} 
