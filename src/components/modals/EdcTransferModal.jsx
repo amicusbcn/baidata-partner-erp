@@ -10,8 +10,8 @@ import {
   AlertCircle,
   ShieldCheck,
 } from "lucide-react";
-import { SECTOR_CONFIG } from "../config/sectorConfig";
-import { localizeDppUrl } from "../services/aasBridge";
+import { SECTOR_CONFIG } from "../../config/sectorConfig";
+import { localizeDppUrl } from "../../services/aasBridge";
 
 const NODES = [
   { id: "erp", title: "ERP / DMS Taller", sub: "Supabase Local" },
