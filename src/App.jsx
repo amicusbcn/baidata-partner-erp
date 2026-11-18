@@ -1,90 +1,94 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "./lib/supabaseClient";
-import { fetchAssetFromOemAas } from "./services/aasBridge";
 import { getInitialLang } from "./hooks/useTranslation";
 import Sidebar from "./components/layout/Sidebar";
-import TopBar from "./components/layout/Topbar";
+import TopBar from "./components/layout/TopBar";
 import DashboardView from "./components/views/DashboardView";
 import WorkOrdersView from "./components/views/WorkOrdersView";
+import ReceptionView from "./components/views/ReceptionView";
 import DiagnosticsView from "./components/views/DiagnosticsView";
-import TestBenchView from "./components/views/TestBenchView";
+import WorkshopTestingView from "./components/views/WorkshopTestingView";
+import BillingDeliveryView from "./components/views/BillingDeliveryView";
 import InventoryView from "./components/views/InventoryView";
-import TraceabilityView from "./components/views/TraceabilityView";
-import CustomersBillingView from "./components/views/CustomersBillingView";
-import NewClientAssetModal from "./components/modals/NewClientAssetModal";
+import EdcTransferModal from "./components/EdcTransferModal";
+
+const STATUS_TO_TAB = {
+  received: "reception",
+  quarantine: "reception",
+  diagnosing: "diagnostics",
+  approval: "diagnostics",
+  repairing: "workshop",
+  testing: "workshop",
+  ready: "billing",
+  closed: "billing",
+};
 
 export default function App() {
   const [lang, setLang] = useState(() => getInitialLang());
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [assetsList, setAssetsList] = useState([]);
-  const [selectedAssetId, setSelectedAssetId] = useState(null);
   const [workOrders, setWorkOrders] = useState([]);
-  const [isNewModalOpen, setIsNewModalOpen] = useState(false);
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [isCreatingNewOrder, setIsCreatingNewOrder] = useState(false);
 
-  const [aasAsset, setAasAsset] = useState(null);
+  // Estado del visualizador modal de interacciones EDC / AAS
+  const [edcModalConfig, setEdcModalConfig] = useState(null);
 
   const handleChangeLang = (nextLang) => {
     setLang(nextLang);
     localStorage.setItem("baidata_erp_lang", nextLang);
   };
 
-  const loadSupabaseData = async (preferredAssetId = null) => {
+  const loadWorkOrders = async (preferredOrderId = null) => {
     if (!supabase) return;
-
-    const { data: assetsData } = await supabase
-      .from("assets")
-      .select("*, customers(*)")
-      .order("created_at", { ascending: false });
-
-    if (assetsData && assetsData.length > 0) {
-      setAssetsList(assetsData);
-      const targetId = preferredAssetId || selectedAssetId || assetsData[0].id;
-      setSelectedAssetId(targetId);
-    }
-
-    const { data: ordersData } = await supabase
+    const { data } = await supabase
       .from("work_orders")
-      .select("*, assets(id, asset_label, internal_ref, customers(full_name))")
+      .select("*, assets(id, asset_label, internal_ref, dpp_uri, customers(*))")
       .order("created_at", { ascending: false });
 
-    if (ordersData) setWorkOrders(ordersData);
+    if (data) {
+      setWorkOrders(data);
+      if (preferredOrderId) {
+        setSelectedOrderId(preferredOrderId);
+      }
+    }
   };
 
   useEffect(() => {
-    loadSupabaseData();
+    loadWorkOrders();
   }, []);
 
-  const selectedAsset = assetsList.find((a) => a.id === selectedAssetId) || null;
-
-  const syncWithOemAas = async (uri) => {
-    if (!uri) return;
-    try {
-      const info = await fetchAssetFromOemAas(uri, lang);
-      setAasAsset(info);
-    } catch {
-      setAasAsset(null);
-    }
+  // Abrir una orden directamente en la sección correspondiente a su estado
+  const handleOpenOrder = (wo) => {
+    if (!wo) return;
+    setIsCreatingNewOrder(false);
+    setSelectedOrderId(wo.id);
+    const targetTab = STATUS_TO_TAB[wo.status] || "reception";
+    setActiveTab(targetTab);
   };
 
-  useEffect(() => {
-    if (selectedAsset?.dpp_uri) {
-      syncWithOemAas(selectedAsset.dpp_uri);
-    }
-  }, [selectedAssetId, selectedAsset?.dpp_uri, lang]);
+  // Ir a Recepción con el formulario de Nueva Orden abierto
+  const handleStartNewOrder = () => {
+    setIsCreatingNewOrder(true);
+    setActiveTab("reception");
+  };
 
-  const handleFullRefresh = async () => {
-    if (selectedAsset?.dpp_uri) {
-      await syncWithOemAas(selectedAsset.dpp_uri);
-    }
-    await loadSupabaseData(selectedAsset?.id);
+  const counts = {
+    totalActive: workOrders.filter((w) => !["closed", "cancelled"].includes(w.status)).length,
+    reception: workOrders.filter((w) => ["received", "quarantine"].includes(w.status)).length,
+    diagnostics: workOrders.filter((w) => ["diagnosing", "approval"].includes(w.status)).length,
+    workshop: workOrders.filter((w) => ["repairing", "testing"].includes(w.status)).length,
+    billing: workOrders.filter((w) => w.status === "ready").length,
   };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex">
       <Sidebar
         activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        pendingOrdersCount={workOrders.filter((w) => w.status !== "closed").length}
+        onSelectTab={(tab) => {
+          setIsCreatingNewOrder(false);
+          setActiveTab(tab);
+        }}
+        counts={counts}
         lang={lang}
       />
 
@@ -95,19 +99,31 @@ export default function App() {
           {activeTab === "dashboard" && (
             <DashboardView
               workOrders={workOrders}
-              onSelectAsset={setSelectedAssetId}
+              onOpenOrder={handleOpenOrder}
               onNavigate={setActiveTab}
-              onOpenNewModal={() => setIsNewModalOpen(true)}
+              onStartNewOrder={handleStartNewOrder}
               lang={lang}
             />
           )}
 
           {activeTab === "workorders" && (
             <WorkOrdersView
-              selectedAsset={selectedAsset}
               workOrders={workOrders}
-              onSelectAsset={setSelectedAssetId}
-              onOrdersUpdated={() => loadSupabaseData(selectedAsset?.id)}
+              onOpenOrder={handleOpenOrder}
+              onStartNewOrder={handleStartNewOrder}
+              lang={lang}
+            />
+          )}
+
+          {activeTab === "reception" && (
+            <ReceptionView
+              workOrders={workOrders}
+              selectedOrderId={selectedOrderId}
+              onSelectOrderId={setSelectedOrderId}
+              isCreatingNew={isCreatingNewOrder}
+              onSetCreatingNew={setIsCreatingNewOrder}
+              onRefreshData={loadWorkOrders}
+              onOpenEdcModal={setEdcModalConfig}
               onNavigate={setActiveTab}
               lang={lang}
             />
@@ -115,59 +131,50 @@ export default function App() {
 
           {activeTab === "diagnostics" && (
             <DiagnosticsView
-              selectedAsset={selectedAsset}
-              assetsList={assetsList}
-              onSelectAsset={setSelectedAssetId}
-              aasAsset={aasAsset}
+              workOrders={workOrders}
+              selectedOrderId={selectedOrderId}
+              onSelectOrderId={setSelectedOrderId}
+              onRefreshData={loadWorkOrders}
+              onOpenEdcModal={setEdcModalConfig}
               onNavigate={setActiveTab}
               lang={lang}
             />
           )}
 
-          {activeTab === "testbench" && (
-            <TestBenchView
-              selectedAsset={selectedAsset}
-              assetsList={assetsList}
-              onSelectAsset={setSelectedAssetId}
-              aasAsset={aasAsset}
-              onSyncSuccess={handleFullRefresh}
-              lang={lang}
-            />
-          )}
-
-          {activeTab === "inventory" && (
-            <InventoryView aasAsset={aasAsset} lang={lang} />
-          )}
-
-          {activeTab === "traceability" && (
-            <TraceabilityView
-              selectedAsset={selectedAsset}
+          {activeTab === "workshop" && (
+            <WorkshopTestingView
               workOrders={workOrders}
+              selectedOrderId={selectedOrderId}
+              onSelectOrderId={setSelectedOrderId}
+              onRefreshData={loadWorkOrders}
+              onOpenEdcModal={setEdcModalConfig}
+              onNavigate={setActiveTab}
               lang={lang}
             />
           )}
 
-          {activeTab === "customers" && (
-            <CustomersBillingView
-              assetsList={assetsList}
+          {activeTab === "billing" && (
+            <BillingDeliveryView
               workOrders={workOrders}
-              selectedAssetId={selectedAssetId}
-              onSelectAsset={setSelectedAssetId}
-              onOpenNewModal={() => setIsNewModalOpen(true)}
+              selectedOrderId={selectedOrderId}
+              onSelectOrderId={setSelectedOrderId}
+              onRefreshData={loadWorkOrders}
               lang={lang}
             />
           )}
+
+          {activeTab === "inventory" && <InventoryView lang={lang} />}
         </main>
       </div>
 
-      <NewClientAssetModal
-        isOpen={isNewModalOpen}
-        onClose={() => setIsNewModalOpen(false)}
-        onCreated={async (newAssetId) => {
-          await loadSupabaseData(newAssetId);
-        }}
-        lang={lang}
-      />
+      {/* Visualizador Modal de Interacciones ERP <-> EDC <-> AAS */}
+      {edcModalConfig && (
+        <EdcTransferModal
+          config={edcModalConfig}
+          onClose={() => setEdcModalConfig(null)}
+          lang={lang}
+        />
+      )}
     </div>
   );
 }

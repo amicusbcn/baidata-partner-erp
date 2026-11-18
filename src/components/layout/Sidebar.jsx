@@ -1,46 +1,76 @@
 import React from "react";
 import {
   LayoutDashboard,
-  ClipboardCheck,
+  Kanban,
+  ClipboardPlus,
   Cpu,
   Activity,
+  Receipt,
   Package,
-  ShieldCheck,
-  Users,
   Wrench,
 } from "lucide-react";
 import { SECTOR_CONFIG } from "../../config/sectorConfig";
-import { useTranslation } from "../../hooks/useTranslation";
 
 export default function Sidebar({
   activeTab,
   onSelectTab,
-  pendingOrdersCount = 0,
+  counts = {},
   lang = "es",
 }) {
-  const { t } = useTranslation(lang);
-
   const navGroups = [
     {
-      title: t("nav.opsGroup"),
+      title: lang === "en" ? "Overview" : "Visión General",
       items: [
-        { id: "dashboard", label: t("nav.dashboard"), icon: LayoutDashboard },
-        { id: "workorders", label: t("nav.workorders"), icon: ClipboardCheck },
+        {
+          id: "dashboard",
+          label: lang === "en" ? "Dashboard & Safety" : "Dashboard",
+          icon: LayoutDashboard,
+        },
+        {
+          id: "workorders",
+          label: lang === "en" ? "Work Orders (Kanban)" : "Órdenes de Trabajo",
+          icon: Kanban,
+          badge: counts.totalActive,
+        },
       ],
     },
     {
-      title: t("nav.engGroup"),
+      title: lang === "en" ? "Workshop Workflow" : "Flujo de Taller",
       items: [
-        { id: "diagnostics", label: t("nav.diagnostics"), icon: Cpu },
-        { id: "testbench", label: t("nav.testbench"), icon: Activity, highlight: true },
+        {
+          id: "reception",
+          label: lang === "en" ? "Intake (New Order)" : "Recepción (Nueva Orden)",
+          icon: ClipboardPlus,
+          badge: counts.reception,
+        },
+        {
+          id: "diagnostics",
+          label: lang === "en" ? "Diagnostics & Quotes" : "Diagnóstico",
+          icon: Cpu,
+          badge: counts.diagnostics,
+        },
+        {
+          id: "workshop",
+          label: lang === "en" ? "Workshop & Testing" : "Taller / Pruebas",
+          icon: Activity,
+          badge: counts.workshop,
+        },
+        {
+          id: "billing",
+          label: lang === "en" ? "Billing & Delivery" : "Entrega y Facturación",
+          icon: Receipt,
+          badge: counts.billing,
+        },
       ],
     },
     {
-      title: t("nav.resGroup"),
+      title: lang === "en" ? "Warehouse" : "Almacén",
       items: [
-        { id: "inventory", label: t("nav.inventory"), icon: Package },
-        { id: "traceability", label: t("nav.traceability"), icon: ShieldCheck },
-        { id: "customers", label: t("nav.customers"), icon: Users },
+        {
+          id: "inventory",
+          label: lang === "en" ? "Inventory & Batches" : "Inventario y Lotes",
+          icon: Package,
+        },
       ],
     },
   ];
@@ -57,7 +87,7 @@ export default function Sidebar({
               {SECTOR_CONFIG.partnerName}
             </p>
             <p className="text-[11px] font-medium text-slate-500 truncate">
-              DMS Industrial · v2.4
+              DMS Industrial · v2.5
             </p>
           </div>
         </div>
@@ -94,22 +124,20 @@ export default function Sidebar({
                   <span className="flex items-center gap-2.5 truncate">
                     <Icon
                       className={`w-4 h-4 shrink-0 ${
-                        isActive
-                          ? "text-amber-400"
-                          : item.highlight
-                          ? "text-emerald-600"
-                          : "text-slate-400"
+                        isActive ? "text-amber-400" : "text-slate-400"
                       }`}
                     />
                     <span className="truncate">{item.label}</span>
                   </span>
-                  {item.id === "workorders" && pendingOrdersCount > 0 && (
+                  {typeof item.badge === "number" && item.badge > 0 && (
                     <span
                       className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                        isActive ? "bg-amber-500 text-slate-950" : "bg-slate-200 text-slate-700"
+                        isActive
+                          ? "bg-amber-500 text-slate-950"
+                          : "bg-slate-200 text-slate-700"
                       }`}
                     >
-                      {pendingOrdersCount}
+                      {item.badge}
                     </span>
                   )}
                 </button>
@@ -120,7 +148,7 @@ export default function Sidebar({
       </nav>
 
       <div className="p-4 border-t border-slate-100 text-[11px] text-slate-500 space-y-1">
-        <p className="font-semibold text-slate-700">{t("nav.nodeTitle")}</p>
+        <p className="font-semibold text-slate-700">Conector Soberano IDSA</p>
         <p className="font-mono text-[10px] truncate">{SECTOR_CONFIG.edcConnectorUrl}</p>
       </div>
     </aside>

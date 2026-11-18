@@ -1,252 +1,138 @@
-import React, { useState, useEffect } from "react";
-import { ShieldCheck, AlertTriangle, ArrowRight, CheckCircle2, Circle } from "lucide-react";
-import { useTranslation } from "../../hooks/useTranslation";
+import React from "react";
+import { ArrowUpRight, Plus } from "lucide-react";
 
-export default function WorkOrdersView({ selectedAsset, onNavigate, lang = "es" }) {
-  const { t } = useTranslation(lang);
+const STATUS_BADGES = {
+  received: { es: "Recepcionada", en: "Received", cls: "bg-slate-200 text-slate-800" },
+  quarantine: { es: "Cuarentena", en: "Quarantine", cls: "bg-rose-100 text-rose-800" },
+  diagnosing: { es: "En Diagnóstico", en: "Diagnosing", cls: "bg-amber-100 text-amber-800" },
+  approval: { es: "Pte. Presupuesto", en: "Quote Pending", cls: "bg-purple-100 text-purple-800" },
+  repairing: { es: "En Taller", en: "In Workshop", cls: "bg-indigo-100 text-indigo-800" },
+  testing: { es: "En Pruebas", en: "In Testing", cls: "bg-cyan-100 text-cyan-800" },
+  ready: { es: "Lista Entrega", en: "Ready", cls: "bg-emerald-100 text-emerald-800" },
+};
 
-  const kanbanColumns = [
-    { id: "received", title: t("workorders.colReceived"), badge: "bg-slate-200 text-slate-800" },
-    { id: "diagnosing", title: t("workorders.colDiagnosing"), badge: "bg-amber-100 text-amber-800" },
-    { id: "approval", title: t("workorders.colApproval"), badge: "bg-purple-100 text-purple-800" },
-    { id: "repairing", title: t("workorders.colRepairing"), badge: "bg-indigo-100 text-indigo-800" },
-    { id: "ready", title: t("workorders.colReady"), badge: "bg-emerald-100 text-emerald-800" },
+export default function WorkOrdersView({
+  workOrders = [],
+  onOpenOrder,
+  onStartNewOrder,
+  lang = "es",
+}) {
+  const columns = [
+    {
+      id: "col_reception",
+      title: lang === "en" ? "Intake / Quarantine" : "Recepción / Cuarentena",
+      statuses: ["received", "quarantine"],
+    },
+    {
+      id: "col_diagnostics",
+      title: lang === "en" ? "Diagnostics & Quote" : "Diagnóstico / Pte. OK",
+      statuses: ["diagnosing", "approval"],
+    },
+    {
+      id: "col_workshop",
+      title: lang === "en" ? "Workshop & Testing" : "En Taller / Pruebas",
+      statuses: ["repairing", "testing"],
+    },
+    {
+      id: "col_ready",
+      title: lang === "en" ? "Ready for Delivery" : "Listas para Entrega",
+      statuses: ["ready"],
+    },
   ];
-
-  const [zones, setZones] = useState({
-    topShell: false,
-    mainConnector: false,
-    chargePort: true,
-    mountingRails: false,
-  });
-
-  const [safetyChecks, setSafetyChecks] = useState({
-    tempOk: true,
-    noOdor: true,
-    noSwelling: true,
-  });
-
-  const [cards, setCards] = useState([
-    {
-      id: "OT-2026-104",
-      serial: "ORBEA-RISE-M10-8841",
-      client: "Ane Miren Etxebarria",
-      issue: "Pérdida de autonomía / BMS alert",
-      stage: "diagnosing",
-    },
-    {
-      id: "OT-2026-103",
-      serial: "BH-ATOMX-7719",
-      client: "Bilbao E-Bike Tours S.L. (B2B)",
-      issue: "Módulo 10S4P + IP67 sealing",
-      stage: "repairing",
-    },
-    {
-      id: "OT-2026-102",
-      serial: "TREK-RAIL-5520",
-      client: "Mikel Agirre",
-      issue: "Charge port inspection",
-      stage: "approval",
-    },
-    {
-      id: "OT-2026-101",
-      serial: "SPECIALIZED-LEVO-3310",
-      client: "Laura Mendizabal",
-      issue: "BMS Firmware + 1C Load Test",
-      stage: "ready",
-    },
-  ]);
-
-  useEffect(() => {
-    if (!selectedAsset) return;
-    setCards((prev) =>
-      prev.map((c, idx) =>
-        idx === 0
-          ? {
-              ...c,
-              serial: selectedAsset.internal_ref || c.serial,
-              client: selectedAsset.customers?.full_name || c.client,
-            }
-          : c
-      )
-    );
-  }, [selectedAsset]);
-
-  const toggleZone = (key) => setZones((prev) => ({ ...prev, [key]: !prev[key] }));
-  const toggleCheck = (key) => setSafetyChecks((prev) => ({ ...prev, [key]: !prev[key] }));
-
-  const advanceCard = (cardId) => {
-    const order = kanbanColumns.map((c) => c.id);
-    setCards((prev) =>
-      prev.map((c) => {
-        if (c.id !== cardId) return c;
-        const nextIdx = Math.min(order.indexOf(c.stage) + 1, order.length - 1);
-        return { ...c, stage: order[nextIdx] };
-      })
-    );
-  };
-
-  const allSafetyPassed = Object.values(safetyChecks).every(Boolean);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-extrabold text-slate-900">{t("workorders.title")}</h1>
-        <p className="text-xs text-slate-500 mt-0.5">{t("workorders.subtitle")}</p>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Check-in físico de carcasa */}
-        <section className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-slate-900">{t("workorders.checkinTitle")}</h2>
-              <p className="text-xs text-slate-500">{t("workorders.checkinSubtitle")}</p>
-            </div>
-            <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">
-              {selectedAsset?.internal_ref || "BAT-2026-8841"}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2.5 text-xs">
-            {[
-              { key: "topShell", label: t("workorders.zoneTop") },
-              { key: "mainConnector", label: t("workorders.zoneMain") },
-              { key: "chargePort", label: t("workorders.zoneCharge") },
-              { key: "mountingRails", label: t("workorders.zoneRails") },
-            ].map((item) => {
-              const damaged = zones[item.key];
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => toggleZone(item.key)}
-                  className={`p-3.5 rounded-xl border text-left transition flex items-center justify-between ${
-                    damaged
-                      ? "bg-amber-50 border-amber-300 text-amber-950"
-                      : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
-                  }`}
-                >
-                  <span className="font-semibold">{item.label}</span>
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      damaged ? "bg-amber-200 text-amber-900" : "bg-emerald-100 text-emerald-800"
-                    }`}
-                  >
-                    {damaged ? t("workorders.incident") : "OK"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Checklist obligatorio de seguridad */}
-        <section className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-slate-900">{t("workorders.safetyTitle")}</h2>
-              <p className="text-xs text-slate-500">{t("workorders.safetySubtitle")}</p>
-            </div>
-            {allSafetyPassed ? (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
-                <ShieldCheck className="w-3.5 h-3.5"/> {t("workorders.safetyOk")}
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800">
-                <AlertTriangle className="w-3.5 h-3.5"/> {t("workorders.safetyQuarantine")}
-              </span>
-            )}
-          </div>
-
-          <div className="space-y-2 text-xs">
-            {[
-              { key: "tempOk", label: t("workorders.chkTemp") },
-              { key: "noOdor", label: t("workorders.chkOdor") },
-              { key: "noSwelling", label: t("workorders.chkSwelling") },
-            ].map((chk) => {
-              const checked = safetyChecks[chk.key];
-              return (
-                <button
-                  key={chk.key}
-                  type="button"
-                  onClick={() => toggleCheck(chk.key)}
-                  className="w-full p-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 flex items-center gap-3 text-left"
-                >
-                  {checked ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0"/>
-                  ) : (
-                    <Circle className="w-4 h-4 text-rose-500 shrink-0"/>
-                  )}
-                  <span className="font-medium text-slate-800">{chk.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      </div>
-
-      {/* Tablero Kanban */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold text-slate-900">{t("workorders.kanbanTitle")}</h2>
-          <button
-            type="button"
-            onClick={() => onNavigate("diagnostics")}
-            className="text-xs font-bold text-indigo-600 hover:underline"
-          >
-            {t("workorders.openFileLink")} {selectedAsset?.internal_ref || "OT-2026-104"} →
-          </button>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-extrabold text-slate-900">
+            {lang === "en" ? "Active Work Orders (Kanban)" : "Órdenes de Trabajo Activas (Kanban)"}
+          </h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {lang === "en"
+              ? "Click any battery card to open its detail view in its current workflow stage"
+              : "Haz clic en cualquier tarjeta para abrir el detalle de la batería en la sección correspondiente a su fase"}
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-3">
-          {kanbanColumns.map((col) => {
-            const colCards = cards.filter((c) => c.stage === col.id);
-            return (
-              <div
-                key={col.id}
-                className="bg-slate-100/80 rounded-2xl border border-slate-200/90 p-3 space-y-2.5 min-h-[240px]"
-              >
-                <div className="flex items-center justify-between px-1">
-                  <span className="text-xs font-bold text-slate-700">{col.title}</span>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${col.badge}`}>
-                    {colCards.length}
-                  </span>
-                </div>
+        <button
+          type="button"
+          onClick={onStartNewOrder}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition"
+        >
+          <Plus className="w-4 h-4 text-amber-400" />
+          <span>{lang === "en" ? "New Work Order" : "Nueva Orden de Trabajo"}</span>
+        </button>
+      </div>
 
-                <div className="space-y-2">
-                  {colCards.map((card) => (
-                    <div
-                      key={card.id}
-                      className="bg-white rounded-xl border border-slate-200 p-3 shadow-2xs space-y-2 text-xs"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono font-bold text-[11px] text-indigo-600">
-                          {card.id}
-                        </span>
-                        <span className="text-[10px] font-mono text-slate-400">{card.serial}</span>
-                      </div>
-                      <p className="font-bold text-slate-900">{card.client}</p>
-                      <p className="text-[11px] text-slate-600 leading-snug">{card.issue}</p>
-
-                      {col.id !== "ready" && (
-                        <button
-                          type="button"
-                          onClick={() => advanceCard(card.id)}
-                          className="w-full pt-1.5 border-t border-slate-100 text-[11px] font-semibold text-slate-600 hover:text-slate-900 flex items-center justify-end gap-1"
-                        >
-                          <span>{t("workorders.advanceStage")}</span>
-                          <ArrowRight className="w-3 h-3"/>
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        {columns.map((col) => {
+          const colOrders = workOrders.filter((w) => col.statuses.includes(w.status));
+          return (
+            <div
+              key={col.id}
+              className="bg-slate-100/90 rounded-2xl border border-slate-200 p-3.5 space-y-3 min-h-[420px]"
+            >
+              <div className="flex items-center justify-between px-1">
+                <span className="text-xs font-extrabold text-slate-800">{col.title}</span>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-white border border-slate-200 text-slate-700">
+                  {colOrders.length}
+                </span>
               </div>
-            );
-          })}
-        </div>
-      </section>
+
+              <div className="space-y-2.5">
+                {colOrders.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-8 italic">
+                    {lang === "en" ? "No batteries in this stage" : "Sin baterías en esta fase"}
+                  </p>
+                ) : (
+                  colOrders.map((wo) => {
+                    const badge = STATUS_BADGES[wo.status] || STATUS_BADGES.received;
+                    return (
+                      <div
+                        key={wo.id}
+                        onClick={() => onOpenOrder(wo)}
+                        className="bg-white rounded-xl border border-slate-200 hover:border-indigo-400 p-3.5 shadow-2xs hover:shadow-sm cursor-pointer transition space-y-2 text-xs group"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono font-bold text-[11px] text-slate-500">
+                            {wo.assets?.internal_ref || "BAT-REF"}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${badge.cls}`}>
+                            {badge[lang] || badge.es}
+                          </span>
+                        </div>
+
+                        <div>
+                          <p className="font-bold text-slate-900 group-hover:text-indigo-600 transition">
+                            {wo.assets?.customers?.full_name || "Cliente"}
+                          </p>
+                          <p className="text-[11px] font-medium text-slate-500 truncate">
+                            {wo.assets?.asset_label}
+                          </p>
+                        </div>
+
+                        <p className="text-[11px] text-slate-600 line-clamp-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                          {wo.issue_description || wo.operation_code}
+                        </p>
+
+                        <div className="pt-1 flex items-center justify-between text-[11px] font-semibold text-indigo-600">
+                          <span className="font-mono text-[10px] text-slate-400">
+                            {wo.aas_srn_id ? `AAS: ${wo.aas_srn_id}` : ""}
+                          </span>
+                          <span className="inline-flex items-center gap-0.5">
+                            {lang === "en" ? "Open file" : "Abrir ficha"}
+                            <ArrowUpRight className="w-3.5 h-3.5" />
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
