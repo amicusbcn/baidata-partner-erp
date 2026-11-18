@@ -11,7 +11,7 @@ import TestBenchView from "./components/views/TestBenchView";
 import InventoryView from "./components/views/InventoryView";
 import TraceabilityView from "./components/views/TraceabilityView";
 import CustomersBillingView from "./components/views/CustomersBillingView";
-import NewClientAssetModal from "./components/NewClientAssetModal";
+import NewClientAssetModal from "./components/modals/NewClientAssetModal";
 
 export default function App() {
   const [lang, setLang] = useState(() => getInitialLang());
