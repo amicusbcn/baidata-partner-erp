@@ -22,7 +22,6 @@ export default function App() {
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
 
   const [aasAsset, setAasAsset] = useState(null);
-  const [aasLoading, setAasLoading] = useState(false);
 
   const handleChangeLang = (nextLang) => {
     setLang(nextLang);
@@ -45,7 +44,7 @@ export default function App() {
 
     const { data: ordersData } = await supabase
       .from("work_orders")
-      .select("*, assets(asset_label, internal_ref, customers(full_name))")
+      .select("*, assets(id, asset_label, internal_ref, customers(full_name))")
       .order("created_at", { ascending: false });
 
     if (ordersData) setWorkOrders(ordersData);
@@ -59,14 +58,11 @@ export default function App() {
 
   const syncWithOemAas = async (uri) => {
     if (!uri) return;
-    setAasLoading(true);
     try {
       const info = await fetchAssetFromOemAas(uri, lang);
       setAasAsset(info);
     } catch {
       setAasAsset(null);
-    } finally {
-      setAasLoading(false);
     }
   };
 
@@ -88,30 +84,20 @@ export default function App() {
       <Sidebar
         activeTab={activeTab}
         onSelectTab={setActiveTab}
-        pendingOrdersCount={assetsList.length}
+        pendingOrdersCount={workOrders.filter((w) => w.status !== "closed").length}
         lang={lang}
       />
 
       <div className="flex-1 flex flex-col min-w-0">
-        <TopBar
-          assetsList={assetsList}
-          selectedAsset={selectedAsset}
-          onSelectAsset={setSelectedAssetId}
-          aasAsset={aasAsset}
-          aasLoading={aasLoading}
-          onSyncAas={syncWithOemAas}
-          onOpenNewModal={() => setIsNewModalOpen(true)}
-          lang={lang}
-          onChangeLang={handleChangeLang}
-        />
+        <TopBar lang={lang} onChangeLang={handleChangeLang} />
 
         <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-6">
           {activeTab === "dashboard" && (
             <DashboardView
-              assetsList={assetsList}
               workOrders={workOrders}
-              aasAsset={aasAsset}
+              onSelectAsset={setSelectedAssetId}
               onNavigate={setActiveTab}
+              onOpenNewModal={() => setIsNewModalOpen(true)}
               lang={lang}
             />
           )}
@@ -119,6 +105,9 @@ export default function App() {
           {activeTab === "workorders" && (
             <WorkOrdersView
               selectedAsset={selectedAsset}
+              workOrders={workOrders}
+              onSelectAsset={setSelectedAssetId}
+              onOrdersUpdated={() => loadSupabaseData(selectedAsset?.id)}
               onNavigate={setActiveTab}
               lang={lang}
             />
@@ -127,6 +116,8 @@ export default function App() {
           {activeTab === "diagnostics" && (
             <DiagnosticsView
               selectedAsset={selectedAsset}
+              assetsList={assetsList}
+              onSelectAsset={setSelectedAssetId}
               aasAsset={aasAsset}
               onNavigate={setActiveTab}
               lang={lang}
@@ -136,6 +127,8 @@ export default function App() {
           {activeTab === "testbench" && (
             <TestBenchView
               selectedAsset={selectedAsset}
+              assetsList={assetsList}
+              onSelectAsset={setSelectedAssetId}
               aasAsset={aasAsset}
               onSyncSuccess={handleFullRefresh}
               lang={lang}
@@ -170,7 +163,9 @@ export default function App() {
       <NewClientAssetModal
         isOpen={isNewModalOpen}
         onClose={() => setIsNewModalOpen(false)}
-        onCreated={(newAssetId) => loadSupabaseData(newAssetId)}
+        onCreated={async (newAssetId) => {
+          await loadSupabaseData(newAssetId);
+        }}
         lang={lang}
       />
     </div>
