@@ -7,8 +7,7 @@ import {
   CheckCircle2,
   AlertCircle,
   FileCode2,
-  CheckSquare,
-  Square,
+  Circle,
 } from "lucide-react";
 import { SECTOR_CONFIG } from "../../config/sectorConfig";
 import { pushInterventionToOemAas, localizeDppUrl } from "../../services/aasBridge";
@@ -185,9 +184,9 @@ export default function TestBenchView({
                   className="w-full p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 flex items-start gap-2.5 text-left"
                 >
                   {checked ? (
-                    <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                   ) : (
-                    <Square className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                    <Circle className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
                   )}
                   <span className="font-medium text-slate-800">{item.label}</span>
                 </button>

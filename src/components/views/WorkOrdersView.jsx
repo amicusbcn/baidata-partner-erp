@@ -1,207 +1,250 @@
-import React from "react";
-import {
-  BatteryCharging,
-  Clock,
-  Activity,
-  CheckCircle2,
-  AlertTriangle,
-  Flame,
-  ArrowRight,
-  ShieldAlert,
-} from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { ShieldCheck, AlertTriangle, ArrowRight, CheckCircle2, Circle } from "lucide-react";
 import { useTranslation } from "../../hooks/useTranslation";
 
-export default function DashboardView({
-  assetsList,
-  workOrders,
-  aasAsset,
-  onNavigate,
-  lang = "es",
-}) {
+export default function WorkOrdersView({ selectedAsset, onNavigate, lang = "es" }) {
   const { t } = useTranslation(lang);
 
-  const kpis = [
-    {
-      label: t("dashboard.kpi1Label"),
-      value: Math.max(assetsList.length, 4),
-      sub: t("dashboard.kpi1Sub"),
-      icon: BatteryCharging,
-      color: "text-slate-900 bg-slate-100",
-    },
-    {
-      label: t("dashboard.kpi2Label"),
-      value: 1,
-      sub: t("dashboard.kpi2Sub"),
-      icon: Clock,
-      color: "text-amber-700 bg-amber-50",
-    },
-    {
-      label: t("dashboard.kpi3Label"),
-      value: 2,
-      sub: t("dashboard.kpi3Sub"),
-      icon: Activity,
-      color: "text-indigo-700 bg-indigo-50",
-    },
-    {
-      label: t("dashboard.kpi4Label"),
-      value: workOrders.length + 1,
-      sub: t("dashboard.kpi4Sub"),
-      icon: CheckCircle2,
-      color: "text-emerald-700 bg-emerald-50",
-    },
+  const kanbanColumns = [
+    { id: "received", title: t("workorders.colReceived"), badge: "bg-slate-200 text-slate-800" },
+    { id: "diagnosing", title: t("workorders.colDiagnosing"), badge: "bg-amber-100 text-amber-800" },
+    { id: "approval", title: t("workorders.colApproval"), badge: "bg-purple-100 text-purple-800" },
+    { id: "repairing", title: t("workorders.colRepairing"), badge: "bg-indigo-100 text-indigo-800" },
+    { id: "ready", title: t("workorders.colReady"), badge: "bg-emerald-100 text-emerald-800" },
   ];
 
-  const channels = [
+  const [zones, setZones] = useState({
+    topShell: false,
+    mainConnector: false,
+    chargePort: true,
+    mountingRails: false,
+  });
+
+  const [safetyChecks, setSafetyChecks] = useState({
+    tempOk: true,
+    noOdor: true,
+    noSwelling: true,
+  });
+
+  const [cards, setCards] = useState([
     {
-      id: "Canal 1 · Chroma 17011",
-      battery: aasAsset?.serial || "BAT-2026-8841",
-      task: t("dashboard.ch1Task"),
-      progress: 68,
-      temp: "24.2 °C",
-      status: t("dashboard.statusRunning"),
+      id: "OT-2026-104",
+      serial: "ORBEA-RISE-M10-8841",
+      client: "Ane Miren Etxebarria",
+      issue: "Pérdida de autonomía / BMS alert",
+      stage: "diagnosing",
     },
     {
-      id: "Canal 2 · Balanceador Activo",
-      battery: "BAT-2026-7719",
-      task: t("dashboard.ch2Task"),
-      progress: 91,
-      temp: "22.8 °C",
-      status: t("dashboard.statusFinishing"),
+      id: "OT-2026-103",
+      serial: "BH-ATOMX-7719",
+      client: "Bilbao E-Bike Tours S.L. (B2B)",
+      issue: "Módulo 10S4P + IP67 sealing",
+      stage: "repairing",
     },
     {
-      id: "Canal 3 · Carga Supervisada",
-      battery: t("dashboard.ch3Battery"),
-      task: t("dashboard.ch3Task"),
-      progress: 0,
-      temp: "20.1 °C",
-      status: t("dashboard.statusFree"),
+      id: "OT-2026-102",
+      serial: "TREK-RAIL-5520",
+      client: "Mikel Agirre",
+      issue: "Charge port inspection",
+      stage: "approval",
     },
-  ];
+    {
+      id: "OT-2026-101",
+      serial: "SPECIALIZED-LEVO-3310",
+      client: "Laura Mendizabal",
+      issue: "BMS Firmware + 1C Load Test",
+      stage: "ready",
+    },
+  ]);
+
+  useEffect(() => {
+    if (!selectedAsset) return;
+    setCards((prev) =>
+      prev.map((c, idx) =>
+        idx === 0
+          ? {
+              ...c,
+              serial: selectedAsset.internal_ref || c.serial,
+              client: selectedAsset.customers?.full_name || c.client,
+            }
+          : c
+      )
+    );
+  }, [selectedAsset]);
+
+  const toggleZone = (key) => setZones((prev) => ({ ...prev, [key]: !prev[key] }));
+  const toggleCheck = (key) => setSafetyChecks((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  const advanceCard = (cardId) => {
+    const order = kanbanColumns.map((c) => c.id);
+    setCards((prev) =>
+      prev.map((c) => {
+        if (c.id !== cardId) return c;
+        const nextIdx = Math.min(order.indexOf(c.stage) + 1, order.length - 1);
+        return { ...c, stage: order[nextIdx] };
+      })
+    );
+  };
+
+  const allSafetyPassed = Object.values(safetyChecks).every(Boolean);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-extrabold text-slate-900">{t("dashboard.title")}</h1>
-        <p className="text-xs text-slate-500 mt-0.5">{t("dashboard.subtitle")}</p>
+        <h1 className="text-xl font-extrabold text-slate-900">{t("workorders.title")}</h1>
+        <p className="text-xs text-slate-500 mt-0.5">{t("workorders.subtitle")}</p>
       </div>
 
-      {/* KPIs Rápidos */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {kpis.map((kpi) => {
-          const Icon = kpi.icon;
-          return (
-            <div
-              key={kpi.label}
-              className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs flex items-start justify-between"
-            >
-              <div>
-                <p className="text-xs font-semibold text-slate-500">{kpi.label}</p>
-                <p className="text-2xl font-extrabold text-slate-900 mt-1">{kpi.value}</p>
-                <p className="text-[11px] text-slate-500 mt-1">{kpi.sub}</p>
-              </div>
-              <div className={`p-2.5 rounded-xl ${kpi.color}`}>
-                <Icon className="w-5 h-5" />
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Check-in físico de carcasa */}
+        <section className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">{t("workorders.checkinTitle")}</h2>
+              <p className="text-xs text-slate-500">{t("workorders.checkinSubtitle")}</p>
             </div>
-          );
-        })}
+            <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">
+              {selectedAsset?.internal_ref || "BAT-2026-8841"}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5 text-xs">
+            {[
+              { key: "topShell", label: t("workorders.zoneTop") },
+              { key: "mainConnector", label: t("workorders.zoneMain") },
+              { key: "chargePort", label: t("workorders.zoneCharge") },
+              { key: "mountingRails", label: t("workorders.zoneRails") },
+            ].map((item) => {
+              const damaged = zones[item.key];
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => toggleZone(item.key)}
+                  className={`p-3.5 rounded-xl border text-left transition flex items-center justify-between ${
+                    damaged
+                      ? "bg-amber-50 border-amber-300 text-amber-950"
+                      : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  <span className="font-semibold">{item.label}</span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      damaged ? "bg-amber-200 text-amber-900" : "bg-emerald-100 text-emerald-800"
+                    }`}
+                  >
+                    {damaged ? t("workorders.incident") : "OK"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Checklist obligatorio de seguridad */}
+        <section className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">{t("workorders.safetyTitle")}</h2>
+              <p className="text-xs text-slate-500">{t("workorders.safetySubtitle")}</p>
+            </div>
+            {allSafetyPassed ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
+                <ShieldCheck className="w-3.5 h-3.5"/> {t("workorders.safetyOk")}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800">
+                <AlertTriangle className="w-3.5 h-3.5"/> {t("workorders.safetyQuarantine")}
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-2 text-xs">
+            {[
+              { key: "tempOk", label: t("workorders.chkTemp") },
+              { key: "noOdor", label: t("workorders.chkOdor") },
+              { key: "noSwelling", label: t("workorders.chkSwelling") },
+            ].map((chk) => {
+              const checked = safetyChecks[chk.key];
+              return (
+                <button
+                  key={chk.key}
+                  type="button"
+                  onClick={() => toggleCheck(chk.key)}
+                  className="w-full p-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 flex items-center gap-3 text-left"
+                >
+                  {checked ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0"/>
+                  ) : (
+                    <Circle className="w-4 h-4 text-rose-500 shrink-0"/>
+                  )}
+                  <span className="font-medium text-slate-800">{chk.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
       </div>
 
-      {/* Alertas de Seguridad Críticas en Litio */}
-      <section className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
+      {/* Tablero Kanban */}
+      <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <ShieldAlert className="w-4 h-4 text-rose-600" />
-            <span>{t("dashboard.alertsTitle")}</span>
-          </h2>
-          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800">
-            {t("dashboard.alertsBadge")}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-          <div className="p-4 rounded-xl bg-rose-50/70 border border-rose-200 flex items-start gap-3">
-            <Flame className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <p className="font-bold text-rose-950">{t("dashboard.alert1Title")}</p>
-              <p className="text-rose-800 leading-relaxed">{t("dashboard.alert1Desc")}</p>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200 flex items-start justify-between gap-3">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <p className="font-bold text-amber-950">
-                  {t("dashboard.alert2TitlePrefix")} {aasAsset?.serial || "BAT-2026-8841"} (ΔV = 48 mV)
-                </p>
-                <p className="text-amber-800 leading-relaxed">{t("dashboard.alert2Desc")}</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => onNavigate("diagnostics")}
-              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold shrink-0 inline-flex items-center gap-1"
-            >
-              <span>{t("dashboard.diagnoseBtn")}</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* Ocupación del Banco de Pruebas */}
-      <section className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-bold text-slate-900">{t("dashboard.benchTitle")}</h2>
-            <p className="text-xs text-slate-500">{t("dashboard.benchSubtitle")}</p>
-          </div>
+          <h2 className="text-sm font-bold text-slate-900">{t("workorders.kanbanTitle")}</h2>
           <button
             type="button"
-            onClick={() => onNavigate("testbench")}
+            onClick={() => onNavigate("diagnostics")}
             className="text-xs font-bold text-indigo-600 hover:underline"
           >
-            {t("dashboard.goBenchLink")}
+            {t("workorders.openFileLink")} {selectedAsset?.internal_ref || "OT-2026-104"} →
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-          {channels.map((ch) => (
-            <div
-              key={ch.id}
-              className="p-4 rounded-xl bg-slate-50 border border-slate-200/90 space-y-2.5"
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-800">{ch.id}</span>
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    ch.progress > 0
-                      ? "bg-indigo-100 text-indigo-800"
-                      : "bg-slate-200 text-slate-600"
-                  }`}
-                >
-                  {ch.status}
-                </span>
-              </div>
-              <p className="font-mono font-bold text-slate-900">{ch.battery}</p>
-              <p className="text-slate-600">{ch.task}</p>
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px] text-slate-500">
-                  <span>
-                    {t("dashboard.progress")}: {ch.progress}%
+        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-3">
+          {kanbanColumns.map((col) => {
+            const colCards = cards.filter((c) => c.stage === col.id);
+            return (
+              <div
+                key={col.id}
+                className="bg-slate-100/80 rounded-2xl border border-slate-200/90 p-3 space-y-2.5 min-h-[240px]"
+              >
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs font-bold text-slate-700">{col.title}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${col.badge}`}>
+                    {colCards.length}
                   </span>
-                  <span>Temp: {ch.temp}</span>
                 </div>
-                <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-indigo-600 rounded-full transition-all"
-                    style={{ width: `${ch.progress}%` }}
-                  />
+
+                <div className="space-y-2">
+                  {colCards.map((card) => (
+                    <div
+                      key={card.id}
+                      className="bg-white rounded-xl border border-slate-200 p-3 shadow-2xs space-y-2 text-xs"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono font-bold text-[11px] text-indigo-600">
+                          {card.id}
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400">{card.serial}</span>
+                      </div>
+                      <p className="font-bold text-slate-900">{card.client}</p>
+                      <p className="text-[11px] text-slate-600 leading-snug">{card.issue}</p>
+
+                      {col.id !== "ready" && (
+                        <button
+                          type="button"
+                          onClick={() => advanceCard(card.id)}
+                          className="w-full pt-1.5 border-t border-slate-100 text-[11px] font-semibold text-slate-600 hover:text-slate-900 flex items-center justify-end gap-1"
+                        >
+                          <span>{t("workorders.advanceStage")}</span>
+                          <ArrowRight className="w-3 h-3"/>
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
     </div>
