@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { supabase } from "./lib/supabaseClient";
 import { getInitialLang } from "./hooks/useTranslation";
 import Sidebar from "./components/layout/Sidebar";
-import TopBar from "./components/layout/TopBar";
+import TopBar from "./components/layout/Topbar";
 import DashboardView from "./components/views/DashboardView";
 import WorkOrdersView from "./components/views/WorkOrdersView";
 import ReceptionView from "./components/views/ReceptionView";
