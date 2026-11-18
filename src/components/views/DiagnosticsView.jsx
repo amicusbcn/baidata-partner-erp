@@ -11,6 +11,7 @@ import {
 import { supabase } from "../../lib/supabaseClient";
 import { SECTOR_CONFIG } from "../../config/sectorConfig";
 import { fetchAssetFromOemAas, pushInterventionToOemAas } from "../../services/aasBridge";
+import { buildIdta02010Collection } from "../../utils/idta02010Builder";
 
 const MATRIX_SAMPLES = [
   { group: "S1", v: 3692, ir: 14.1 },
@@ -102,37 +103,43 @@ export default function DiagnosticsView({
   const handleUploadDiagnosisToAas = () => {
     if (!selectedOrder) return;
     const dppUri = selectedOrder.assets?.dpp_uri;
-    const unsignedPayload = {
-      protocol: "IDTA-02010:ServiceRequestNotification/1.0.3",
-      targetAssetUri: dppUri,
-      signedByDid: SECTOR_CONFIG.partnerDid,
+    const remarksText = `Diagnóstico BMS en taller: SoH medido ${detectedSoh}%, ΔV = 51 mV en S4.`;
+
+    const builtIdta = buildIdta02010Collection({
+      nextIndex: 2,
       serviceType: "InnerInspection",
-      measuredSoH: Number(detectedSoh),
-      imbalanceDeltaMv: 51,
-      remarks: "Diagnóstico BMS completado: desequilibrio detectado en grupo S4 (ΔV 51 mV).",
-    };
+      operationLabel: "Diagnóstico preventivo de celdas y calibración BMS",
+      partNumber: "NONE",
+      publicRemarks: remarksText,
+      operatorName: SECTOR_CONFIG.partnerName,
+      operatorDid: SECTOR_CONFIG.partnerDid,
+    });
 
     onOpenEdcModal({
-      direction: "outbound",
+      mode: "push",
       title:
         lang === "en"
-          ? "Uploading BMS Diagnosis to OEM AAS (IDTA 02010)"
-          : "Subiendo Diagnóstico BMS al AAS del Fabricante",
+          ? "Pushing BMS Diagnosis to OEM AAS (IDTA 02010)"
+          : "Enviando Diagnóstico BMS al AAS del OEM (Push)",
       dppUri,
-      unsignedPayload,
+      contractOfferId: "urn:uuid:offer-oem-workshop-write-02010",
+      requestOrPayload: builtIdta.collection,
       executeFn: async () => {
         const aasInfo = await fetchAssetFromOemAas(dppUri, lang);
-        return pushInterventionToOemAas({
-          serviceSubmodelId: aasInfo.serviceSubmodelId,
-          conditionSubmodelId: aasInfo.conditionSubmodelId,
-          currentCount: aasInfo.currentCount,
+        const exactPayload = buildIdta02010Collection({
+          nextIndex: Number(aasInfo.currentCount || 0) + 1,
           serviceType: "InnerInspection",
           operationLabel: "Diagnóstico preventivo de celdas y calibración BMS",
           partNumber: "NONE",
-          publicRemarks: `Diagnóstico BMS en taller: SoH medido ${detectedSoh}%, ΔV = 51 mV en S4.`,
-          postSoH: Number(detectedSoh),
+          publicRemarks: remarksText,
           operatorName: SECTOR_CONFIG.partnerName,
           operatorDid: SECTOR_CONFIG.partnerDid,
+        });
+        return pushInterventionToOemAas({
+          serviceSubmodelId: aasInfo.serviceSubmodelId,
+          conditionSubmodelId: aasInfo.conditionSubmodelId,
+          postSoH: Number(detectedSoh),
+          precomputedPayload: exactPayload,
         });
       },
       onCompleted: async (res) => {

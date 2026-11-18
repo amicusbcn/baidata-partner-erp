@@ -10,6 +10,7 @@ import {
 import { supabase } from "../../lib/supabaseClient";
 import { SECTOR_CONFIG } from "../../config/sectorConfig";
 import { fetchAssetFromOemAas, pushInterventionToOemAas } from "../../services/aasBridge";
+import { buildIdta02010Collection } from "../../utils/idta02010Builder";
 
 export default function WorkshopTestingView({
   workOrders = [],
@@ -124,37 +125,41 @@ export default function WorkshopTestingView({
     const opObj =
       SECTOR_CONFIG.operations.find((o) => o.code === opCode) || SECTOR_CONFIG.operations[1];
 
-    const unsignedPayload = {
-      protocol: "IDTA-02010:ServiceRequestNotification/1.0.3",
-      targetAssetUri: dppUri,
-      signedByDid: SECTOR_CONFIG.partnerDid,
+    const builtIdta = buildIdta02010Collection({
+      nextIndex: 3,
       serviceType: opCode,
-      replacedComponent: partUsed,
-      verifiedPostSoH: Number(postSoH),
-      technicalSummary: publicRemarks.trim() || opObj.label.es,
-    };
+      operationLabel: opObj.label,
+      partNumber: partUsed,
+      publicRemarks: publicRemarks.trim(),
+      operatorName: SECTOR_CONFIG.partnerName,
+      operatorDid: SECTOR_CONFIG.partnerDid,
+    });
 
     onOpenEdcModal({
-      direction: "outbound",
+      mode: "push",
       title:
         lang === "en"
-          ? "Certifying Intervention in Battery AAS (IDTA 02010)"
-          : "Certificando Intervención en AAS de la Batería",
+          ? "Certifying Repair in OEM AAS (IDTA 02010)"
+          : "Certificando Reparación en AAS del OEM (Push)",
       dppUri,
-      unsignedPayload,
+      contractOfferId: "urn:uuid:offer-oem-workshop-write-02010",
+      requestOrPayload: builtIdta.collection,
       executeFn: async () => {
         const aasInfo = await fetchAssetFromOemAas(dppUri, lang);
-        return pushInterventionToOemAas({
-          serviceSubmodelId: aasInfo.serviceSubmodelId,
-          conditionSubmodelId: aasInfo.conditionSubmodelId,
-          currentCount: aasInfo.currentCount,
+        const exactPayload = buildIdta02010Collection({
+          nextIndex: Number(aasInfo.currentCount || 0) + 1,
           serviceType: opCode,
           operationLabel: opObj.label,
           partNumber: partUsed,
           publicRemarks: publicRemarks.trim(),
-          postSoH: Number(postSoH),
           operatorName: SECTOR_CONFIG.partnerName,
           operatorDid: SECTOR_CONFIG.partnerDid,
+        });
+        return pushInterventionToOemAas({
+          serviceSubmodelId: aasInfo.serviceSubmodelId,
+          conditionSubmodelId: aasInfo.conditionSubmodelId,
+          postSoH: Number(postSoH),
+          precomputedPayload: exactPayload,
         });
       },
       onCompleted: async (res) => {

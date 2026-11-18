@@ -9,26 +9,30 @@ import {
   ArrowLeft,
   AlertCircle,
   ShieldCheck,
+  XCircle,
 } from "lucide-react";
-import { SECTOR_CONFIG } from "../../config/sectorConfig";
-import { localizeDppUrl } from "../../services/aasBridge";
+import { SECTOR_CONFIG } from "../config/sectorConfig";
+import { localizeDppUrl } from "../services/aasBridge";
 
 const NODES = [
   { id: "erp", title: "ERP / DMS Taller", sub: "Supabase Local" },
-  { id: "edc_shop", title: "EDC Taller", sub: "edp-workshop:8191" },
-  { id: "edc_oem", title: "EDC DPP (OEM)", sub: "edc-iberiavolt:8191" },
+  { id: "edc_shop", title: "EDC Taller", sub: "edc-workshop:8191" },
+  { id: "edc_oem", title: "EDC OEM (IberiaVolt)", sub: "edc-iberiavolt:8191" },
   { id: "aas", title: "AAS Batería", sub: "Azure BaSyx v3" },
 ];
 
 export default function EdcTransferModal({ config, onClose, lang = "es" }) {
-  // config: { direction: 'outbound'|'inbound', title, unsignedPayload, dppUri, executeFn, onCompleted }
+  // config: { mode: 'pull'|'push', title, dppUri, contractOfferId, requestOrPayload, executeFn, onCompleted }
   const [currentStep, setCurrentStep] = useState(0);
+  const [failedStep, setFailedStep] = useState(null);
   const [inspectedTab, setInspectedTab] = useState(null);
   const [realResponse, setRealResponse] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
   const startedRef = useRef(false);
 
-  const isInbound = config?.direction === "inbound";
+  const isPull = config?.mode === "pull";
+  const totalSteps = isPull ? 4 : 5;
+  const executionStep = isPull ? 3 : 4;
 
   useEffect(() => {
     if (!config || startedRef.current) return;
@@ -36,27 +40,27 @@ export default function EdcTransferModal({ config, onClose, lang = "es" }) {
 
     const runPipeline = async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      let activeStep = 1;
       try {
-        setCurrentStep(1); // 1. Preparando datos
-        await wait(650);
-        setCurrentStep(2); // 2. Firmando datos
-        await wait(650);
-        setCurrentStep(3); // 3. Estableciendo políticas EDC
-        await wait(700);
-        setCurrentStep(4); // 4. Conectando con el DPP
-        await wait(600);
-        setCurrentStep(5); // 5. Enviando / Recibiendo datos reales en BaSyx
+        for (let s = 1; s < executionStep; s++) {
+          activeStep = s;
+          setCurrentStep(s);
+          await wait(650);
+        }
 
+        activeStep = executionStep;
+        setCurrentStep(executionStep);
         const res = await config.executeFn();
         setRealResponse(res);
         await wait(450);
 
-        setCurrentStep(6); // 6. Proceso finalizado
+        setCurrentStep(totalSteps);
         if (config.onCompleted) {
           await config.onCompleted(res);
         }
       } catch (err) {
-        setErrorMsg(err.message || "Error en la comunicación con Azure BaSyx");
+        setFailedStep(activeStep);
+        setErrorMsg(err.message || "Error en la negociación o transferencia EDC");
       }
     };
 
@@ -65,110 +69,147 @@ export default function EdcTransferModal({ config, onClose, lang = "es" }) {
 
   if (!config) return null;
 
-  // Determinar qué nodo de la arquitectura superior está activo según el paso y sentido
+  // Iluminación de nodos superiores según paso y sentido
   const getActiveNodeIndex = () => {
-    if (!isInbound) {
-      if (currentStep <= 2) return 0; // ERP/DMS
-      if (currentStep === 3) return 1; // EDC Taller
-      if (currentStep === 4) return 2; // EDC DPP
-      return 3; // AAS Batería
+    if (isPull) {
+      if (currentStep === 1) return 0; // ERP pide al EDC Taller
+      if (currentStep === 2) return 1; // EDC Taller negocia contrato con EDC OEM
+      if (currentStep === 3) return 2; // EDC OEM consulta AAS Batería
+      return 3; // Datos recibidos desde AAS
     } else {
-      if (currentStep <= 2) return 0; // ERP prepara consulta
-      if (currentStep === 3) return 1; // EDC Taller negocia
-      if (currentStep === 4) return 2; // EDC DPP valida
-      if (currentStep === 5) return 3; // AAS Batería responde
-      return 0; // Dato entregado al ERP
+      if (currentStep === 1) return 0; // ERP filtra RGPD y prepara IDTA 02010
+      if (currentStep === 2) return 1; // EDC Taller negocia contrato escritura
+      if (currentStep === 3) return 2; // EDC OEM valida acuerdo
+      return 3; // AAS Batería persiste registro
     }
   };
 
   const activeNodeIdx = getActiveNodeIndex();
 
-  const signedEnvelope = {
-    "@context": ["https://www.w3.org/2018/credentials/v1", "https://w3id.org/idsa/contexts/context.jsonld"],
-    type: ["VerifiablePresentation", "DataSpaceServiceMessage"],
-    issuer: SECTOR_CONFIG.partnerDid,
-    issuanceDate: new Date().toISOString(),
-    credentialSubject: config.unsignedPayload,
-    proof: {
-      type: "Ed25519Signature2020",
-      verificationMethod: `${SECTOR_CONFIG.partnerDid}#key-1`,
-      proofPurpose: "assertionMethod",
-      jws: "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..k9xP2mQ8vL4nR7tW1zY6cB3fH5jK8pM2sV9wX4zA",
+  // Contratos DCAT / ODRL reales según el tipo de operación
+  const offerId =
+    config.contractOfferId ||
+    (isPull
+      ? "urn:uuid:offer-oem-workshop-read-02035"
+      : "urn:uuid:offer-oem-workshop-write-02010");
+
+  const dcatContractNegotiation = {
+    "@context": { "@vocab": "https://w3id.org/edc/v0.0.1/ns/" },
+    "@type": "ContractRequest",
+    counterPartyAddress: "https://edc-iberiavolt.es/api/v1/dsp",
+    protocol: "dataspace-protocol-http",
+    policy: {
+      "@type": "odrl:Offer",
+      "@id": offerId,
+      assigner: "did:web:iberiavolt.es",
+      assignee: SECTOR_CONFIG.partnerDid,
+      target: isPull
+        ? "asset:battery-submodels-Nameplate-Condition-Circularity"
+        : "asset:battery-submodel-IDTA-02010-ServiceRequestNotification",
+      permission: [
+        {
+          action: isPull ? "odrl:read" : "odrl:modify",
+          constraint: {
+            leftOperand: "VerifiedCredentialType",
+            operator: "odrl:eq",
+            rightOperand: "AccreditedBatteryRepairWorkshop",
+          },
+        },
+      ],
     },
   };
 
-  const odrlPolicy = {
-    "@type": "odrl:Agreement",
-    "@id": "urn:uuid:policy-idta-02010-repair-write",
-    assigner: isInbound ? "did:web:iberiavolt.es" : SECTOR_CONFIG.partnerDid,
-    assignee: isInbound ? SECTOR_CONFIG.partnerDid : "did:web:iberiavolt.es",
-    target: config.dppUri,
-    permission: [
-      {
-        action: isInbound ? "odrl:read" : "odrl:modify",
-        constraint: [
-          {
-            leftOperand: "purpose",
-            operator: "odrl:eq",
-            rightOperand: "EU_Battery_Regulation_2023_1542_Traceability",
-          },
-          {
-            leftOperand: "submodelSemanticId",
-            operator: "odrl:eq",
-            rightOperand: isInbound ? "IDTA-02035-Nameplate-Condition" : "0173-1#01-AHX443#001",
-          },
-        ],
-      },
-    ],
-  };
-
-  const steps = [
-    {
-      num: 1,
-      label: lang === "en" ? "Preparing minimized payload (GDPR filter)" : "Preparando los datos (Filtro RGPD)",
-      btnLabel: lang === "en" ? "View unsigned payload" : "Ver payload sin firmar",
-      inspectKey: "unsigned",
-      inspectData: config.unsignedPayload,
-    },
-    {
-      num: 2,
-      label: lang === "en" ? "Signing payload with workshop DID" : "Firmando los datos con identidad DID",
-      btnLabel: lang === "en" ? "View signed payload" : "Ver payload firmado",
-      inspectKey: "signed",
-      inspectData: signedEnvelope,
-    },
-    {
-      num: 3,
-      label: lang === "en" ? "Negotiating ODRL policies (Workshop EDC)" : "Estableciendo políticas (EDC Taller)",
-      btnLabel: lang === "en" ? "View associated policies" : "Ver políticas asociadas",
-      inspectKey: "policy",
-      inspectData: odrlPolicy,
-    },
-    {
-      num: 4,
-      label: lang === "en" ? "Connecting with OEM DPP node" : "Conectando con el DPP del fabricante",
-      btnLabel: null,
-    },
-    {
-      num: 5,
-      label: isInbound
-        ? lang === "en"
-          ? "Fetching authorized submodels from BaSyx"
-          : "Leyendo submodelos autorizados desde AAS"
-        : lang === "en"
-        ? "Transmitting intervention to BaSyx AAS"
-        : "Enviando datos al AAS de la batería",
-      btnLabel: lang === "en" ? "View response" : "Ver respuesta",
-      inspectKey: "response",
-      inspectData: realResponse || { status: "Pending..." },
-    },
-    {
-      num: 6,
-      label: lang === "en" ? "Process completed successfully" : "Proceso finalizado",
-      btnLabel: lang === "en" ? "Open AAS / DPP" : "Ver AAS",
-      isExternalLink: true,
-    },
-  ];
+  const steps = isPull
+    ? [
+        {
+          num: 1,
+          label:
+            lang === "en"
+              ? "ERP Taller → EDC Taller: Requesting asset resolution by globalAssetId"
+              : "ERP Taller → EDC Taller: Solicitando consulta por globalAssetId",
+          btnLabel: lang === "en" ? "View Catalog Request" : "Ver petición al EDC",
+          inspectKey: "request",
+          inspectData: config.requestOrPayload,
+        },
+        {
+          num: 2,
+          label:
+            lang === "en"
+              ? "EDC Taller ↔ EDC OEM: Selecting read contract & negotiating ODRL policy"
+              : "EDC Taller ↔ EDC OEM: Seleccionando contrato de lectura y validando DID",
+          btnLabel: lang === "en" ? "View Contract Offer" : "Ver contrato seleccionado",
+          inspectKey: "contract",
+          inspectData: dcatContractNegotiation,
+        },
+        {
+          num: 3,
+          label:
+            lang === "en"
+              ? "EDC OEM → AAS Battery: Fetching authorized submodels from BaSyx"
+              : "EDC OEM → AAS Batería: Leyendo submodelos autorizados en BaSyx",
+          btnLabel: lang === "en" ? "View BaSyx Response" : "Ver respuesta real AAS",
+          inspectKey: "response",
+          inspectData: realResponse?.rawBasyxReceipt || realResponse || { status: "Querying..." },
+        },
+        {
+          num: 4,
+          label:
+            lang === "en"
+              ? "AAS Battery → ERP Taller: Telemetry loaded into workshop file"
+              : "AAS Batería → ERP Taller: Datos incorporados a la ficha de recepción",
+          btnLabel: lang === "en" ? "Open Public DPP" : "Ver AAS / Pasaporte",
+          isExternalLink: true,
+        },
+      ]
+    : [
+        {
+          num: 1,
+          label:
+            lang === "en"
+              ? "ERP Taller: GDPR filter applied & IDTA 02010 element built"
+              : "ERP Taller: Filtro RGPD aplicado y payload IDTA 02010 preparado",
+          btnLabel: lang === "en" ? "View IDTA 02010 Payload" : "Ver payload real a enviar",
+          inspectKey: "payload",
+          inspectData: config.requestOrPayload,
+        },
+        {
+          num: 2,
+          label:
+            lang === "en"
+              ? "EDC Taller ↔ EDC OEM: Selecting write contract & signing with DID"
+              : "EDC Taller ↔ EDC OEM: Seleccionando contrato de escritura y firmando con DID",
+          btnLabel: lang === "en" ? "View Write Contract" : "Ver contrato y firma DID",
+          inspectKey: "contract",
+          inspectData: dcatContractNegotiation,
+        },
+        {
+          num: 3,
+          label:
+            lang === "en"
+              ? "EDC Taller → EDC OEM: Opening Data Plane transfer channel"
+              : "EDC Taller → EDC OEM: Estableciendo canal de transferencia (Data Plane)",
+          btnLabel: null,
+        },
+        {
+          num: 4,
+          label:
+            lang === "en"
+              ? "EDC OEM → AAS Battery: Executing POST/PATCH in Azure BaSyx"
+              : "EDC OEM → AAS Batería: Escribiendo intervención en Azure BaSyx",
+          btnLabel: lang === "en" ? "View BaSyx Receipt" : "Ver respuesta real BaSyx",
+          inspectKey: "response",
+          inspectData: realResponse?.basyxReceipt || realResponse || { status: "Sending..." },
+        },
+        {
+          num: 5,
+          label:
+            lang === "en"
+              ? "Process completed: Record persisted in OEM AAS"
+              : "Proceso finalizado: Registro persistido en el AAS del OEM",
+          btnLabel: lang === "en" ? "Open Updated AAS" : "Ver AAS actualizado",
+          isExternalLink: true,
+        },
+      ];
 
   const activeInspection = steps.find((s) => s.inspectKey === inspectedTab);
   const localizedDppHref = localizeDppUrl(config.dppUri, lang);
@@ -176,7 +217,6 @@ export default function EdcTransferModal({ config, onClose, lang = "es" }) {
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
       <div className="bg-white border border-slate-200 rounded-2xl max-w-3xl w-full shadow-2xl overflow-hidden text-slate-900 my-auto">
-        {/* Cabecera */}
         <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <ShieldCheck className="w-5 h-5 text-emerald-400" />
@@ -195,30 +235,35 @@ export default function EdcTransferModal({ config, onClose, lang = "es" }) {
         </div>
 
         <div className="p-6 space-y-6">
-          {/* ESQUEMA SUPERIOR DE NODOS DEL ESPACIO DE DATOS */}
+          {/* ESQUEMA SUPERIOR DE NODOS */}
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
             <div className="flex items-center justify-between mb-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
               <span>
-                {isInbound
+                {isPull
                   ? lang === "en"
-                    ? "Data Flow: OEM AAS → Workshop ERP"
-                    : "Sentido: AAS Batería → ERP Taller"
+                    ? "PULL Flow: OEM AAS → Workshop ERP"
+                    : "Flujo PULL: Consulta AAS Batería → ERP Taller"
                   : lang === "en"
-                  ? "Data Flow: Workshop ERP → OEM AAS"
-                  : "Sentido: ERP Taller → AAS Batería"}
+                  ? "PUSH Flow: Workshop ERP → OEM AAS"
+                  : "Flujo PUSH: Escritura ERP Taller → AAS Batería"}
               </span>
-              <span className="font-mono text-emerald-700">IDSA / EDC Protocol</span>
+              <span className="font-mono text-emerald-700">Eclipse Dataspace Protocol</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-7 items-center gap-2">
               {NODES.map((node, idx) => {
-                const isHighlighted = idx === activeNodeIdx;
-                const isDone = currentStep === 6 || (!isInbound && idx < activeNodeIdx);
+                const isFailedNode = failedStep !== null && idx === activeNodeIdx;
+                const isHighlighted = !failedStep && idx === activeNodeIdx;
+                const isDone =
+                  !failedStep && (currentStep === totalSteps || idx < activeNodeIdx);
+
                 return (
                   <React.Fragment key={node.id}>
                     <div
                       className={`sm:col-span-1 p-3 rounded-xl border text-center transition-all duration-300 ${
-                        isHighlighted
+                        isFailedNode
+                          ? "bg-rose-600 border-rose-700 text-white shadow-md"
+                          : isHighlighted
                           ? "bg-indigo-600 border-indigo-700 text-white shadow-md scale-[1.03]"
                           : isDone
                           ? "bg-emerald-50 border-emerald-300 text-emerald-950"
@@ -228,7 +273,7 @@ export default function EdcTransferModal({ config, onClose, lang = "es" }) {
                       <p className="text-xs font-extrabold leading-tight">{node.title}</p>
                       <p
                         className={`text-[10px] font-mono mt-1 truncate ${
-                          isHighlighted ? "text-indigo-200" : "text-slate-400"
+                          isHighlighted || isFailedNode ? "text-white/80" : "text-slate-400"
                         }`}
                       >
                         {node.sub}
@@ -237,16 +282,14 @@ export default function EdcTransferModal({ config, onClose, lang = "es" }) {
 
                     {idx < NODES.length - 1 && (
                       <div className="hidden sm:flex justify-center text-slate-400">
-                        {isInbound ? (
-                          <ArrowLeft
-                            className={`w-4 h-4 ${
-                              idx === activeNodeIdx ? "text-indigo-600 animate-pulse" : ""
-                            }`}
-                          />
+                        {isPull && currentStep === totalSteps ? (
+                          <ArrowLeft className="w-4 h-4 text-emerald-600" />
                         ) : (
                           <ArrowRight
                             className={`w-4 h-4 ${
-                              idx === activeNodeIdx ? "text-indigo-600 animate-pulse" : ""
+                              idx === activeNodeIdx && !failedStep
+                                ? "text-indigo-600 animate-pulse"
+                                : ""
                             }`}
                           />
                         )}
@@ -258,18 +301,25 @@ export default function EdcTransferModal({ config, onClose, lang = "es" }) {
             </div>
           </div>
 
-          {/* LISTA DE PASOS DE EJECUCIÓN */}
+          {/* LISTA DE PASOS ADAPTADA A PULL O PUSH */}
           <div className="space-y-2 text-xs">
             {steps.map((st) => {
-              const isCompleted = currentStep > st.num || (st.num === 6 && currentStep === 6);
-              const isRunning = currentStep === st.num && st.num < 6 && !errorMsg;
-              const isPending = currentStep < st.num;
+              const isStepFailed = failedStep === st.num;
+              const isCompleted =
+                !isStepFailed &&
+                failedStep === null &&
+                (currentStep > st.num || (st.num === totalSteps && currentStep === totalSteps));
+              const isRunning =
+                !isStepFailed && failedStep === null && currentStep === st.num && st.num < totalSteps;
+              const isPending = currentStep < st.num || (failedStep !== null && st.num > failedStep);
 
               return (
                 <div
                   key={st.num}
                   className={`px-4 py-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 transition ${
-                    isRunning
+                    isStepFailed
+                      ? "bg-rose-50 border-rose-300 text-rose-950"
+                      : isRunning
                       ? "bg-indigo-50/70 border-indigo-300 text-indigo-950"
                       : isCompleted
                       ? "bg-white border-slate-200 text-slate-800"
@@ -277,7 +327,9 @@ export default function EdcTransferModal({ config, onClose, lang = "es" }) {
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
-                    {isCompleted ? (
+                    {isStepFailed ? (
+                      <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    ) : isCompleted ? (
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                     ) : isRunning ? (
                       <Loader2 className="w-4 h-4 text-indigo-600 animate-spin shrink-0" />
@@ -291,8 +343,7 @@ export default function EdcTransferModal({ config, onClose, lang = "es" }) {
                     </span>
                   </div>
 
-                  {/* Botones de inspección de payloads / respuesta / AAS */}
-                  {st.btnLabel && !isPending && (
+                  {st.btnLabel && !isPending && !isStepFailed && (
                     <>
                       {st.isExternalLink ? (
                         localizedDppHref && (
@@ -329,7 +380,7 @@ export default function EdcTransferModal({ config, onClose, lang = "es" }) {
             })}
           </div>
 
-          {/* Visor desplegable del JSON inspeccionado */}
+          {/* Visor JSON real */}
           {activeInspection && (
             <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-2">
               <div className="flex items-center justify-between text-[11px] text-slate-400">
@@ -344,16 +395,23 @@ export default function EdcTransferModal({ config, onClose, lang = "es" }) {
                   Cerrar visor ✕
                 </button>
               </div>
-              <pre className="font-mono text-[11px] text-slate-200 overflow-x-auto max-h-48 leading-relaxed">
+              <pre className="font-mono text-[11px] text-slate-200 overflow-x-auto max-h-52 leading-relaxed">
                 {JSON.stringify(activeInspection.inspectData, null, 2)}
               </pre>
             </div>
           )}
 
           {errorMsg && (
-            <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMsg}</span>
+            <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">
+                  {lang === "en"
+                    ? `Transfer aborted at step ${failedStep}`
+                    : `Intercambio detenido en el paso ${failedStep}`}
+                </p>
+                <p className="mt-0.5 font-mono text-[11px]">{errorMsg}</p>
+              </div>
             </div>
           )}
 
@@ -363,7 +421,7 @@ export default function EdcTransferModal({ config, onClose, lang = "es" }) {
               onClick={onClose}
               className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition"
             >
-              {currentStep === 6 || errorMsg
+              {currentStep === totalSteps || errorMsg
                 ? lang === "en"
                   ? "Close & Continue"
                   : "Cerrar y Continuar"

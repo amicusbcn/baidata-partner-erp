@@ -17,6 +17,7 @@ import jsQR from "jsqr";
 import { supabase } from "../../lib/supabaseClient";
 import { SECTOR_CONFIG } from "../../config/sectorConfig";
 import { fetchAssetFromOemAas, extractSerialFromUri } from "../../services/aasBridge";
+import { buildIdta02010Collection } from "../../utils/idta02010Builder";
 
 export default function ReceptionView({
   workOrders = [],
@@ -104,15 +105,16 @@ export default function ReceptionView({
     setDppUri(cleanUri);
 
     onOpenEdcModal({
-      direction: "inbound",
+      mode: "pull",
       title:
         lang === "en"
-          ? "Reading Battery DPP via Data Space (EDC)"
-          : "Consultando Pasaporte Digital de Batería vía EDC",
+          ? "Pulling Battery AAS from OEM via EDC"
+          : "Consultando AAS de Batería al OEM vía EDC (Pull)",
       dppUri: cleanUri,
-      unsignedPayload: {
-        action: "READ_AUTHORIZED_SUBMODELS",
-        assetIdentificationLink: cleanUri,
+      contractOfferId: "urn:uuid:offer-oem-workshop-read-02035",
+      requestOrPayload: {
+        consumerDid: SECTOR_CONFIG.partnerDid,
+        globalAssetId: cleanUri,
         requestedSubmodels: ["Nameplate", "ProductCondition", "Circularity"],
       },
       executeFn: () => fetchAssetFromOemAas(cleanUri, lang),

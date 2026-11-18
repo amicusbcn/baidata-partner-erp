@@ -69,13 +69,16 @@ export function localizeDppUrl(rawUrl = "", lang = "es") {
   }
 }
 
+// 1. LECTURA REAL DESDE AZURE BASYX (PULL)
 export async function fetchAssetFromOemAas(dppUriOrId, lang = "es") {
   const serial = extractSerialFromUri(dppUriOrId);
 
   const shellsRes = await fetch(`${AAS_BASE_URL}/shells`, {
     headers: { Accept: "application/json" },
   });
-  if (!shellsRes.ok) throw new Error(`Error conectando con AAS OEM (${shellsRes.status})`);
+  if (!shellsRes.ok) {
+    throw new Error(`HTTP ${shellsRes.status}: No se pudo consultar el registro AAS del OEM.`);
+  }
 
   const shellsPayload = await shellsRes.json();
   const shells = Array.isArray(shellsPayload) ? shellsPayload : shellsPayload.result || [];
@@ -90,7 +93,7 @@ export async function fetchAssetFromOemAas(dppUriOrId, lang = "es") {
   });
 
   if (!targetShell) {
-    throw new Error(`No se encontró ningún activo en el AAS del OEM con ID "${serial}".`);
+    throw new Error(`404 Not Found: No existe ningún AAS registrado para "${serial}".`);
   }
 
   const linkedIds = new Set(
@@ -100,7 +103,9 @@ export async function fetchAssetFromOemAas(dppUriOrId, lang = "es") {
   const smRes = await fetch(`${AAS_BASE_URL}/submodels`, {
     headers: { Accept: "application/json" },
   });
-  if (!smRes.ok) throw new Error(`Error leyendo submodelos (${smRes.status})`);
+  if (!smRes.ok) {
+    throw new Error(`HTTP ${smRes.status}: Error al leer los submodelos autorizados.`);
+  }
 
   const smPayload = await smRes.json();
   const allSubmodels = Array.isArray(smPayload) ? smPayload : smPayload.result || [];
@@ -122,7 +127,6 @@ export async function fetchAssetFromOemAas(dppUriOrId, lang = "es") {
     "Fabricante OEM"
   );
 
-  // Estado BMS (ProductCondition)
   const condEls = smCond?.submodelElements || [];
   const soh = getPropVal(
     findEl(condEls, "StateOfCertifiedEnergy")?.value || [],
@@ -135,7 +139,6 @@ export async function fetchAssetFromOemAas(dppUriOrId, lang = "es") {
     0
   );
 
-  // Repuestos y manual (Circularity)
   const circEls = smCirc?.submodelElements || [];
   const architecture = getTextVal(findEl(circEls, "CellArchitecture"), lang, "10S4P");
   const dismantling =
@@ -152,12 +155,12 @@ export async function fetchAssetFromOemAas(dppUriOrId, lang = "es") {
     }
   }
 
-  // Contador actual de intervenciones (IDTA 02010)
   const servEls = smService?.submodelElements || [];
   const currentCount = getPropVal(servEls, "NumberOfServiceRequestNotifications", 1);
 
   return {
     serial,
+    aasId: targetShell.id,
     shellIdShort: targetShell.idShort,
     globalAssetId: targetShell.assetInformation?.globalAssetId || dppUriOrId,
     productName,
@@ -170,27 +173,41 @@ export async function fetchAssetFromOemAas(dppUriOrId, lang = "es") {
     conditionSubmodelId: smCond?.id,
     serviceSubmodelId: smService?.id,
     currentCount,
+    // Metadatos reales recibidos de BaSyx para inspección en el modal EDC
+    rawBasyxReceipt: {
+      httpStatus: 200,
+      aasId: targetShell.id,
+      globalAssetId: targetShell.assetInformation?.globalAssetId,
+      authorizedSubmodelsRead: [smNameplate, smCond, smCirc]
+        .filter(Boolean)
+        .map((s) => ({
+          idShort: s.idShort,
+          id: s.id,
+          semanticId: s.semanticId?.keys?.[0]?.value || null,
+        })),
+      extractedValues: {
+        ManufacturerProductDesignation: productName,
+        ManufacturerName: manufacturer,
+        StateOfCertifiedEnergyValue: soh,
+        NumberOfFullCyclesValue: cycles,
+        DismantlingAndRemovalInformation: dismantling,
+        SparePartsCount: spareParts.length,
+      },
+    },
   };
 }
 
-export async function pushInterventionToOemAas({
-  serviceSubmodelId,
-  conditionSubmodelId,
-  currentCount = 1,
+// 2. CONSTRUCTOR PURO DEL ELEMENTO IDTA 02010 (EL MISMO QUE VIAJA AL SERVIDOR)
+export function buildIdta02010Collection({
+  nextIndex = 2,
   serviceType,
   operationLabel,
   partNumber = "NONE",
   publicRemarks = "",
-  postSoH = null,
   operatorName,
   operatorDid,
 }) {
-  if (!serviceSubmodelId) {
-    throw new Error("El AAS del fabricante no tiene vinculado el submodelo ServiceRequestNotification.");
-  }
-
   const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  const nextIndex = Number(currentCount || 0) + 1;
   const srnId = `SRN-2026-${String(nextIndex).padStart(3, "0")}`;
   const uniqueIdShort = `ServiceRequestNotification_${Date.now().toString().slice(-6)}`;
 
@@ -198,7 +215,7 @@ export async function pushInterventionToOemAas({
   const labelEn =
     typeof operationLabel === "object" ? operationLabel.en : `${serviceType}: ${operationLabel}`;
 
-  const newCollection = {
+  const collection = {
     modelType: "SubmodelElementCollection",
     idShort: uniqueIdShort,
     semanticId: {
@@ -310,29 +327,69 @@ export async function pushInterventionToOemAas({
     ],
   };
 
+  return { srnId, nowIso, nextIndex, collection };
+}
+
+// 3. ESCRITURA REAL EN AZURE BASYX (PUSH)
+export async function pushInterventionToOemAas({
+  serviceSubmodelId,
+  conditionSubmodelId,
+  currentCount = 1,
+  serviceType,
+  operationLabel,
+  partNumber = "NONE",
+  publicRemarks = "",
+  postSoH = null,
+  operatorName,
+  operatorDid,
+  precomputedPayload = null,
+}) {
+  if (!serviceSubmodelId) {
+    throw new Error("El AAS del fabricante no tiene vinculado el submodelo ServiceRequestNotification.");
+  }
+
+  const built =
+    precomputedPayload ||
+    buildIdta02010Collection({
+      nextIndex: Number(currentCount || 0) + 1,
+      serviceType,
+      operationLabel,
+      partNumber,
+      publicRemarks,
+      operatorName,
+      operatorDid,
+    });
+
   const encodedServiceSm = toBase64Url(serviceSubmodelId);
-  const postRes = await fetch(`${AAS_BASE_URL}/submodels/${encodedServiceSm}/submodel-elements`, {
+  const targetEndpoint = `${AAS_BASE_URL}/submodels/${encodedServiceSm}/submodel-elements`;
+
+  const postRes = await fetch(targetEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(newCollection),
+    body: JSON.stringify(built.collection),
   });
+
   if (!postRes.ok) {
-    throw new Error(`Error BaSyx POST (${postRes.status})`);
+    const errText = await postRes.text().catch(() => "");
+    throw new Error(`HTTP ${postRes.status} desde BaSyx: ${errText || "Rechazado por el servidor AAS"}`);
   }
+
+  const createdBody = await postRes.json().catch(() => ({}));
 
   await fetch(
     `${AAS_BASE_URL}/submodels/${encodedServiceSm}/submodel-elements/NumberOfServiceRequestNotifications/$value`,
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(String(nextIndex)),
+      body: JSON.stringify(String(built.nextIndex)),
     }
   ).catch(() => {});
 
+  let sohPatchStatus = null;
   if (conditionSubmodelId && postSoH !== null && postSoH !== "") {
     const encodedCondSm = toBase64Url(conditionSubmodelId);
-    const cleanTs = nowIso.replace("Z", "");
-    await Promise.all([
+    const cleanTs = built.nowIso.replace("Z", "");
+    const [r1] = await Promise.all([
       fetch(
         `${AAS_BASE_URL}/submodels/${encodedCondSm}/submodel-elements/StateOfCertifiedEnergy.StateOfCertifiedEnergyValue/$value`,
         {
@@ -349,8 +406,19 @@ export async function pushInterventionToOemAas({
           body: JSON.stringify(cleanTs),
         }
       ),
-    ]).catch(() => {});
+    ]).catch(() => [null]);
+    sohPatchStatus = r1?.status || null;
   }
 
-  return { srnId, timestamp: nowIso };
+  return {
+    srnId: built.srnId,
+    timestamp: built.nowIso,
+    basyxReceipt: {
+      httpStatus: postRes.status,
+      submodelId: serviceSubmodelId,
+      createdElementIdShort: createdBody.idShort || built.collection.idShort,
+      serviceRequestNotificationId: built.srnId,
+      sohUpdatedInProductCondition: sohPatchStatus ? { httpStatus: sohPatchStatus, newSoH: postSoH } : "Not modified",
+    },
+  };
 }
