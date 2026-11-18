@@ -3,39 +3,64 @@ export const SECTOR_CONFIG = {
   partnerName: "Taller E-Mobility Bilbao",
   partnerDid: "did:web:emobility-bilbao.es",
   edcConnectorUrl: "edc-dataplane.emobility-bilbao.es:8191",
-  sectorBadge: "Movilidad Eléctrica · Servicio Técnico Autorizado",
+  sectorBadge: {
+    es: "Movilidad Eléctrica · Servicio Técnico Autorizado",
+    en: "E-Mobility · Authorized Technical Service",
+  },
   defaultDppPortalUrl: "https://dpp-test-bed.vercel.app",
   labels: {
-    appTitle: "DMS Taller · Gestión de Intervenciones",
-    customerEntity: "Propietario / Cliente",
-    internalRef: "Bastidor / Matrícula Vehículo",
-    assetLabel: "Vehículo / Pack Asociado",
-    extraField1Key: "bike_model",
-    extraField1Label: "Modelo de Bicicleta",
-    extraField2Key: "motor",
-    extraField2Label: "Sistema Motor",
+    es: {
+      appTitle: "DMS Taller · Gestión de Intervenciones",
+      customerEntity: "Propietario / Cliente",
+      internalRef: "Bastidor / Matrícula Vehículo",
+      assetLabel: "Vehículo / Pack Asociado",
+      extraField1Key: "bike_model",
+      extraField1Label: "Modelo de Bicicleta",
+      extraField2Key: "motor",
+      extraField2Label: "Sistema Motor",
+    },
+    en: {
+      appTitle: "Workshop DMS · Intervention Management",
+      customerEntity: "Owner / Customer",
+      internalRef: "Vehicle Frame / Plate ID",
+      assetLabel: "Associated Vehicle / Pack",
+      extraField1Key: "bike_model",
+      extraField1Label: "Bicycle Model",
+      extraField2Key: "motor",
+      extraField2Label: "Drive Unit System",
+    },
   },
-  // Vocabulario cerrado compatible con IDTA 02010 (DIN 31051 / EN 13306)
-  // Para Acería o Construcción, basta con adaptar estos códigos y descripciones:
   operations: [
     {
       code: "InnerInspection",
-      label: "Diagnóstico preventivo de celdas y calibración BMS",
+      label: {
+        es: "Diagnóstico preventivo de celdas y calibración BMS",
+        en: "Preventive cell diagnostics and BMS calibration",
+      },
       defaultUpdateSoh: false,
     },
     {
       code: "Repair",
-      label: "Sustitución de módulo de celdas o componente defectuoso",
+      label: {
+        es: "Sustitución de módulo de celdas o componente defectuoso",
+        en: "Defective cell module or component replacement",
+      },
       defaultUpdateSoh: true,
     },
     {
       code: "FirmwareUpdate",
-      label: "Actualización de firmware de gestión térmica y seguridad BMS",
+      label: {
+        es: "Actualización de firmware de gestión térmica y seguridad BMS",
+        en: "BMS thermal management and safety firmware update",
+      },
       defaultUpdateSoh: false,
     },
     {
       code: "Overhauling",
-      label: "Reacondicionamiento integral para Segunda Vida (Art. 77.6)",
+      label: {
+        es: "Reacondicionamiento integral para Segunda Vida (Art. 77.6)",
+        en: "Full overhauling and repurposing for Second Life (Art. 77.6)",
+      },
       defaultUpdateSoh: true,
     },
   ],

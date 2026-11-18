@@ -36,11 +36,12 @@ function getPropVal(elements = [], idShort, fallback = undefined) {
   return el.value;
 }
 
-function getTextVal(el, fallback = "") {
+function getTextVal(el, lang = "es", fallback = "") {
   if (!el || !el.value) return fallback;
   if (typeof el.value === "string") return el.value;
   if (Array.isArray(el.value)) {
     return (
+      el.value.find((v) => v.language === lang)?.text ||
       el.value.find((v) => v.language === "es")?.text ||
       el.value.find((v) => v.language === "en")?.text ||
       el.value[0]?.text ||
@@ -56,7 +57,19 @@ export function extractSerialFromUri(uriOrId = "") {
   return match?.[1] ? decodeURIComponent(match[1]) : trimmed;
 }
 
-export async function fetchAssetFromOemAas(dppUriOrId) {
+export function localizeDppUrl(rawUrl = "", lang = "es") {
+  if (!rawUrl) return "";
+  try {
+    const url = new URL(rawUrl);
+    const cleanPath = url.pathname.replace(/^\/(es|en)(?=\/)/i, "");
+    url.pathname = lang === "en" ? `/en${cleanPath}` : cleanPath;
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+export async function fetchAssetFromOemAas(dppUriOrId, lang = "es") {
   const serial = extractSerialFromUri(dppUriOrId);
 
   const shellsRes = await fetch(`${AAS_BASE_URL}/shells`, {
@@ -94,17 +107,18 @@ export async function fetchAssetFromOemAas(dppUriOrId) {
   const submodels = allSubmodels.filter((s) => linkedIds.has(s.id));
 
   const smNameplate = submodels.find((s) => s.idShort === "Nameplate");
-  const smTech = submodels.find((s) => s.idShort === "TechnicalData");
   const smCond = submodels.find((s) => s.idShort === "ProductCondition");
   const smCirc = submodels.find((s) => s.idShort === "Circularity");
   const smService = submodels.find((s) => s.idShort === "ServiceRequestNotification");
 
   const productName = getTextVal(
     findEl(smNameplate?.submodelElements, "ManufacturerProductDesignation"),
+    lang,
     targetShell.idShort
   );
   const manufacturer = getTextVal(
     findEl(smNameplate?.submodelElements, "ManufacturerName"),
+    lang,
     "Fabricante OEM"
   );
 
@@ -123,7 +137,7 @@ export async function fetchAssetFromOemAas(dppUriOrId) {
 
   // Repuestos y manual (Circularity)
   const circEls = smCirc?.submodelElements || [];
-  const architecture = getTextVal(findEl(circEls, "CellArchitecture"), "10S4P");
+  const architecture = getTextVal(findEl(circEls, "CellArchitecture"), lang, "10S4P");
   const dismantling =
     findEl(circEls, "DismantlingAndRemovalInformation")?.value?.[0]?.value || "Manual B2B";
 
@@ -180,6 +194,10 @@ export async function pushInterventionToOemAas({
   const srnId = `SRN-2026-${String(nextIndex).padStart(3, "0")}`;
   const uniqueIdShort = `ServiceRequestNotification_${Date.now().toString().slice(-6)}`;
 
+  const labelEs = typeof operationLabel === "object" ? operationLabel.es : operationLabel;
+  const labelEn =
+    typeof operationLabel === "object" ? operationLabel.en : `${serviceType}: ${operationLabel}`;
+
   const newCollection = {
     modelType: "SubmodelElementCollection",
     idShort: uniqueIdShort,
@@ -221,8 +239,8 @@ export async function pushInterventionToOemAas({
         idShort: "ShortText",
         semanticId: { type: "ExternalReference", keys: [{ type: "GlobalReference", value: "0173-1#02-ABI762#001" }] },
         value: [
-          { language: "es", text: operationLabel },
-          { language: "en", text: `${serviceType}: ${operationLabel}` },
+          { language: "es", text: labelEs },
+          { language: "en", text: labelEn },
         ],
       },
       {
